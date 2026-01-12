@@ -14,9 +14,9 @@ struct App<'a> {
     pixels: Option<Pixels<'a>>,
     width: u32,
     height: u32,
-    center_re: f64,
-    center_im: f64,
-    zoom: f64,
+    center_re: f32,
+    center_im: f32,
+    zoom: f32,
 }
 //-0.1015, 0.9563
 impl Default for App<'_> {
@@ -40,8 +40,8 @@ impl ApplicationHandler for App<'_> {
                 Window::default_attributes()
                     .with_title("Mandelbrot")
                     .with_inner_size(winit::dpi::LogicalSize::new(
-                        self.width as f64,
-                        self.height as f64,
+                        self.width as f32,
+                        self.height as f32,
                     )),
             )
             .unwrap();
@@ -71,7 +71,6 @@ impl ApplicationHandler for App<'_> {
                     self.zoom,
                 );
                 self.zoom = self.zoom * 1.01;
-                println!("Zoom: {}", self.zoom);
                 if pixels.render().is_err() {
                     event_loop.exit();
                 }
@@ -82,7 +81,7 @@ impl ApplicationHandler for App<'_> {
     }
 }
 
-fn draw(frame: &mut [u8], width: u32, height: u32, center_re: f64, center_im: f64, zoom: f64) {
+fn draw(frame: &mut [u8], width: u32, height: u32, center_re: f32, center_im: f32, zoom: f32) {
     let max_iter = 1000;
     let span_re = 3.5 / zoom;
     let span_im = 3.0 / zoom;
@@ -95,15 +94,15 @@ fn draw(frame: &mut [u8], width: u32, height: u32, center_re: f64, center_im: f6
         .par_chunks_mut((width * 4) as usize) // eine Zeile pro Chunk
         .enumerate()
         .for_each(|(py, row)| {
-            let im = y_min + (py as f64 / height as f64) * (y_max - y_min);
+            let im = y_min + (py as f32 / height as f32) * (y_max - y_min);
 
             for px in 0..width as usize {
-                let re = x_min + (px as f64 / width as f64) * (x_max - x_min);
+                let re = x_min + (px as f32 / width as f32) * (x_max - x_min);
                 let tuple_esc = escape_time(re, im, max_iter);
                 let color = if tuple_esc.0 == max_iter {
                     0 // schwarz für Punkte in der Menge
                 } else {
-                    let smooth = tuple_esc.0 as f64 + 1.0 - tuple_esc.1.ln().ln() / 2.0_f64.ln();
+                    let smooth = tuple_esc.0 as f32 + 1.0 - tuple_esc.1.ln().ln() / 2.0_f32.ln();
                     ((smooth * 10.0) % 256.0) as u8
                 };
 
@@ -116,11 +115,11 @@ fn draw(frame: &mut [u8], width: u32, height: u32, center_re: f64, center_im: f6
         });
 }
 
-fn escape_time(c_re: f64, c_im: f64, max_iter: u32) -> (u32, f64) {
-    let mut z_re: f64 = 0.0;
-    let mut z_im: f64 = 0.0;
-    let mut re_check: f64 = 0.0;
-    let mut im_check: f64 = 0.0;
+fn escape_time(c_re: f32, c_im: f32, max_iter: u32) -> (u32, f32) {
+    let mut z_re: f32 = 0.0;
+    let mut z_im: f32 = 0.0;
+    let mut re_check: f32 = 0.0;
+    let mut im_check: f32 = 0.0;
 
     let q = (c_re - 0.25) * (c_re - 0.25) + c_im * c_im;
 
@@ -164,8 +163,8 @@ fn escape_time(c_re: f64, c_im: f64, max_iter: u32) -> (u32, f64) {
     return (max_iter, z); // nie escaped -> in der Menge
 }
 
-fn approx_equal(a: f64, b: f64) -> bool {
-    (a - b).abs() < 1e-10
+fn approx_equal(a: f32, b: f32) -> bool {
+    (a - b).abs() < f32::EPSILON
 }
 
 fn main() {
