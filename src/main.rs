@@ -1,10 +1,10 @@
 use pixels::{Pixels, SurfaceTexture};
+use rayon::prelude::*;
 use std::sync::Arc;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
-use rayon::prelude::*;
 
 const WIDTH: u32 = 800;
 const HEIGHT: u32 = 600;
@@ -62,8 +62,16 @@ impl ApplicationHandler for App<'_> {
             }
             WindowEvent::RedrawRequested => {
                 let pixels = self.pixels.as_mut().unwrap();
-                draw(pixels.frame_mut(), self.width, self.height, self.center_re, self.center_im, self.zoom);
+                draw(
+                    pixels.frame_mut(),
+                    self.width,
+                    self.height,
+                    self.center_re,
+                    self.center_im,
+                    self.zoom,
+                );
                 self.zoom = self.zoom * 1.01;
+                println!("Zoom: {}", self.zoom);
                 if pixels.render().is_err() {
                     event_loop.exit();
                 }
@@ -75,7 +83,7 @@ impl ApplicationHandler for App<'_> {
 }
 
 fn draw(frame: &mut [u8], width: u32, height: u32, center_re: f64, center_im: f64, zoom: f64) {
-    let max_iter = 100;
+    let max_iter = 1000;
     let span_re = 3.5 / zoom;
     let span_im = 3.0 / zoom;
     let x_min = center_re - span_re / 2.0;
@@ -84,15 +92,20 @@ fn draw(frame: &mut [u8], width: u32, height: u32, center_re: f64, center_im: f6
     let y_max = center_im + span_im / 2.0;
 
     frame
-        .par_chunks_mut((width * 4) as usize)  // eine Zeile pro Chunk
+        .par_chunks_mut((width * 4) as usize) // eine Zeile pro Chunk
         .enumerate()
         .for_each(|(py, row)| {
             let im = y_min + (py as f64 / height as f64) * (y_max - y_min);
-            
+
             for px in 0..width as usize {
                 let re = x_min + (px as f64 / width as f64) * (x_max - x_min);
-                let iterations = escape_time(re, im, max_iter);
-                let color = (iterations * 255 / max_iter) as u8;
+                let tuple_esc = escape_time(re, im, max_iter);
+                let color = if tuple_esc.0 == max_iter {
+                    0 // schwarz für Punkte in der Menge
+                } else {
+                    let smooth = tuple_esc.0 as f64 + 1.0 - tuple_esc.1.ln().ln() / 2.0_f64.ln();
+                    ((smooth * 10.0) % 256.0) as u8
+                };
 
                 let i = px * 4;
                 row[i] = color;
@@ -103,24 +116,37 @@ fn draw(frame: &mut [u8], width: u32, height: u32, center_re: f64, center_im: f6
         });
 }
 
+fn escape_time(c_re: f64, c_im: f64, max_iter: u32) -> (u32, f64) {
+    let mut z_re: f64 = 0.0;
+    let mut z_im: f64 = 0.0;
+    let mut re_check: f64 = 0.0;
+    let mut im_check: f64 = 0.0;
 
-fn escape_time(c_re: f64, c_im: f64, max_iter: u32) -> u32 {
-    let mut z_re:f64 = 0.0;
-    let mut z_im:f64 = 0.0;
+    let q = (c_re - 0.25) * (c_re - 0.25) + c_im * c_im;
 
-    let q = (c_re - 0.25)*(c_re - 0.25) + c_im*c_im;
-
-    if q*(q+(c_re-0.25)) < c_im * c_im / 4.0{
-        return max_iter;
+    if q * (q + (c_re - 0.25)) < c_im * c_im / 4.0 {
+        let z = (z_re * z_re + z_im * z_im).sqrt();
+        return (max_iter, z);
     }
-    if (c_re +1.0)*(c_re +1.0) + c_im * c_im < 1.0/16.0{
-        return max_iter;
+    if (c_re + 1.0) * (c_re + 1.0) + c_im * c_im < 1.0 / 16.0 {
+        let z = (z_re * z_re + z_im * z_im).sqrt();
+        return (max_iter, z);
     }
-    
+
     for i in 0..max_iter {
+        if approx_equal(z_re, re_check)
+            && approx_equal(z_im, im_check)
+            && i > 2
+            && !(i - 1).is_power_of_two()
+        {
+            let z = (z_re * z_re + z_im * z_im).sqrt();
+            return (max_iter, z);
+        }
+
         // 1. Prüfen ob escaped: z_re² + z_im² > 4
-        if z_re * z_re + z_im * z_im > 4.0 {
-            return i;
+        if z_re * z_re + z_im * z_im > 2500.0 {
+            let z = (z_re * z_re + z_im * z_im).sqrt();
+            return (i, z);
         }
         // 2. Neues z berechnen (z = z² + c)
         let z_re_neu = z_re * z_re - z_im * z_im + c_re;
@@ -128,9 +154,18 @@ fn escape_time(c_re: f64, c_im: f64, max_iter: u32) -> u32 {
 
         z_re = z_re_neu;
         z_im = z_im_neu;
-    }
 
-    return max_iter; // nie escaped → in der Menge
+        if i.is_power_of_two() {
+            re_check = z_re;
+            im_check = z_im;
+        }
+    }
+    let z = (z_re * z_re + z_im * z_im).sqrt();
+    return (max_iter, z); // nie escaped -> in der Menge
+}
+
+fn approx_equal(a: f64, b: f64) -> bool {
+    (a - b).abs() < 1e-10
 }
 
 fn main() {
